@@ -1,0 +1,30 @@
+seed: 42
+
+model:
+  pretrain: meta-llama/Llama-3.1-8B-Instruct  # 你的HF基座（与ImplicitPRM一致）
+  flash_attn2: true
+  lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+
+# 每个类型：类别数 m（softmax 维度），温度 tau；alpha/mu 如需细化可在 trainer 中按类型加权
+types:
+  safety:      { m: 2, tau: 1.0, alpha: 1.0, mu: 1.0 }
+  humanity:    { m: 2, tau: 1.0, alpha: 1.0, mu: 1.0 }
+  helpfulness: { m: 3, tau: 0.8, alpha: 1.0, mu: 1.0 }
+
+data:
+  train_path: data/multirm_train.jsonl
+  use_chat_template: false   # 若你的tokenizer有chat模板且想用，改为 true
+
+train:
+  batch_size: 4
+  max_len: 2048
+  steps: 2000
+  lr: 3.0e-4
+  weight_decay: 0.0
+  grad_clip: 1.0
+  log_every: 20
+  save_every: 500
+  out_dir: outputs/multirm-8b
