@@ -83,7 +83,7 @@ class MultiTypeRewardModel(nn.Module):
         return self.heads[k](emb) / tau  # [B, m_k]
 
     def probs(self, emb: torch.Tensor, k: str) -> torch.Tensor:
-        return F.softmax(self.logits(emb, k), dim=-1)
+        return F.softmax(self.logits(emb, k), dim=-1)  # 分类和偏好
 
     def reward_scalar(self, emb: torch.Tensor, k: str) -> torch.Tensor:
-        return self.reward_proj[k](emb).squeeze(-1)  # [B]
+        return self.reward_proj[k](emb).squeeze(-1)  # [B] 回归
