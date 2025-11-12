@@ -44,7 +44,7 @@ class MultiTypeRewardModel(nn.Module):
             hidden_size = self.base.config.hidden_sizes[-1]
         assert hidden_size is not None, "Cannot infer hidden_size from base model config."
 
-        # 2) LoRA（可选）
+        # 2) LoRA
         if lora and PEFT_AVAILABLE:
             target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
             peft_cfg = LoraConfig(
@@ -58,7 +58,7 @@ class MultiTypeRewardModel(nn.Module):
         self.reward_proj = nn.ModuleDict()
         for k in self.types:
             m = int(type_specs[k]["m"])
-            self.heads[k] = nn.Linear(hidden_size, m, bias=True)
+            self.heads[k] = nn.Linear(hidden_size, m, bias=True) #W,b
             self.reward_proj[k] = nn.Linear(hidden_size, 1, bias=True)
 
         # 4) 简单池化策略
