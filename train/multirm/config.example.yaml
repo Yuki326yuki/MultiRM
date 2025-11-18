@@ -1,13 +1,10 @@
 seed: 42
 
 model:
-  pretrain: meta-llama/Meta-Llama-3-8B-Instruct
-  tokenizer_name_or_path: meta-llama/Meta-Llama-3-8B-Instruct
+  pretrain: /hpc2hdd/home/jianmu/home/models/Qwen2.5-7B-Instruct
+  tokenizer_name_or_path: /hpc2hdd/home/jianmu/home/models/Qwen2.5-7B-Instruct
   flash_attn2: true
-  lora: false           # A800 80G 完全可以全参 finetune；若想省显存设 true
-  lora_r: 16
-  lora_alpha: 32
-  lora_dropout: 0.05
+  
 
 # 各类型：类别数 m_k、温度 tau_k、α_k (CE 权重)、μ_k (MSE 权重)
 types:

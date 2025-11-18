@@ -156,7 +156,6 @@ def add_ultrafeedback(out_f, max_samples=None):
                 out_f.write(json.dumps(cls, ensure_ascii=False) + "\n")
 
 
-
 def add_helpsteer2(out_f, max_samples=None):
     """
     nvidia/HelpSteer2：
