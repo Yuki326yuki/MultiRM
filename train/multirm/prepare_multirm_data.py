@@ -76,42 +76,66 @@ def add_ultrafeedback_binarized(out_f, max_samples=None):
 def add_ultrafeedback(out_f, max_samples=None):
     """
     openbmb/UltraFeedback:
-      - 每条有 instruction + 多个 response，每个 response 有多维打分
-    注意：实际字段名请你拉一下 dataset 看。
-      这里假设:
-        row["instruction"]
-        row["responses"] = list[{"response": str, "scores": {...}}]
+      每条 row：
+        - "instruction": prompt
+        - "completions": list[
+            {
+              "response": str,
+              "overall_score": float(0~10),
+              "fine-grained_score": float,
+              "principle": "...",
+              "annotations": {
+                  "helpfulness": [ {"Rating": "3", ...}, ... ],
+                  "truthfulness": [ {"Rating": "5", ...}, ... ],
+                  "honesty": [...],
+                  "instruction_following": [...]
+              }
+            }, ...
+          ]
+    我们从每个 completion 里抽：
+      - overall_score 作为 overall 维度
+      - annotations 里的各维度平均 Rating 作为 1~5 分，再归一到 [0,1]
+      然后生成 reg + cls 样本
     """
+    from datasets import load_dataset
+
     ds = load_dataset("openbmb/UltraFeedback", split="train")
     n = len(ds) if max_samples is None else min(len(ds), max_samples)
 
     for i in range(n):
         row = ds[i]
         prompt = row.get("instruction") or row.get("prompt") or ""
-        responses = row["responses"]
+        completions = row["completions"]   # ✅ 正确字段名
 
-        for r in responses:
-            text = r.get("response") or r.get("completion") or ""
-            scores = r.get("scores", {})
+        for c in completions:
+            text = c.get("response") or ""
+            annotations = c.get("annotations", {})
 
-            # 这些 key 需要你根据实际数据稍微对一下
-            overall = float(scores.get("overall_score", scores.get("overall", 0.0)))
-            helpful = float(scores.get("helpfulness", 0.0))
-            truth = float(scores.get("truthfulness", 0.0))
-            honesty = float(scores.get("honesty", 0.0))
-            instr = float(scores.get("instruction_following", 0.0))
+            # 1) overall_score 0~10，归一到 0~1
+            overall_score = float(c.get("overall_score", 0.0))
+            attrs = {}
+            if overall_score is not None:
+                attrs["overall"] = max(0.0, min(1.0, overall_score / 10.0))
 
-            def norm(s):
-                return max(0.0, min(1.0, s / 10.0))
+            # 2) 四个细分维度：helpfulness / truthfulness / honesty / instruction_following
+            for dim in ["helpfulness", "truthfulness", "honesty", "instruction_following"]:
+                if dim not in annotations:
+                    continue
+                lst = annotations[dim]
+                ratings = []
+                for item in lst:
+                    if "Rating" in item:
+                        try:
+                            ratings.append(float(item["Rating"]))
+                        except Exception:
+                            pass
+                if ratings:
+                    # Rating 是 1~5，简单除以 5.0 归一
+                    val = sum(ratings) / len(ratings)
+                    attrs[dim] = max(0.0, min(1.0, val / 5.0))
 
-            items = [
-                ("overall", norm(overall)),
-                ("helpfulness", norm(helpful)),
-                ("truthfulness", norm(truth)),
-                ("honesty", norm(honesty)),
-                ("instruction_following", norm(instr)),
-            ]
-            for t, v in items:
+            # 3) 为每一个维度产生 reg + cls 样本
+            for t, v in attrs.items():
                 reg = {
                     "dataset": "UltraFeedback",
                     "mode": "reg",
@@ -130,6 +154,7 @@ def add_ultrafeedback(out_f, max_samples=None):
                 }
                 out_f.write(json.dumps(reg, ensure_ascii=False) + "\n")
                 out_f.write(json.dumps(cls, ensure_ascii=False) + "\n")
+
 
 
 def add_helpsteer2(out_f, max_samples=None):
