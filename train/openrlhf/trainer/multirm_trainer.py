@@ -39,11 +39,8 @@ class MultiTypeRMTrainer:
             model_name_or_path=cfg["model"]["pretrain"],
             type_specs=cfg["types"],
             use_flash_attn_2=cfg["model"].get("flash_attn2", True),
-            lora=cfg["model"].get("lora", False),
-            lora_r=cfg["model"].get("lora_r", 8),
-            lora_alpha=cfg["model"].get("lora_alpha", 16),
-            lora_dropout=cfg["model"].get("lora_dropout", 0.05),
-        ).to(self.device)
+            ).to(self.device)
+
 
         # optim & sched
         self.opt = AdamW(

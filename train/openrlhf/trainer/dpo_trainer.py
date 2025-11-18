@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
-from flash_attn.utils.distributed import all_gather
+#from flash_attn.utils.distributed import all_gather
 from torch import nn
 from torch.nn import functional as F
 from torch.optim import Optimizer
@@ -14,6 +14,19 @@ from tqdm import tqdm
 from openrlhf.models import DPOLoss
 from openrlhf.utils.distributed_sampler import DistributedSampler
 
+def all_gather(tensor: torch.Tensor):
+    """
+    简单替代 flash_attn.utils.distributed.all_gather 的实现。
+    - 单卡训练时：直接返回原 tensor
+    - 多卡训练时：用 torch.distributed.all_gather 收集，然后在 dim=0 拼接
+    """
+    if not dist.is_available() or not dist.is_initialized():
+        return tensor
+
+    world_size = dist.get_world_size()
+    tensor_list = [torch.zeros_like(tensor) for _ in range(world_size)]
+    dist.all_gather(tensor_list, tensor)
+    return torch.cat(tensor_list, dim=0)
 
 class DPOTrainer(ABC):
     """
