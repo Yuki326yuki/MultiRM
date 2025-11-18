@@ -23,7 +23,7 @@ echo "[INFO] PYTHONPATH = $PYTHONPATH"
 # 5. 训练多类型 Reward Model
 echo "[INFO] Training MultiType Reward Model..."
 python -m openrlhf.cli.train_multirm \
-    --config multirm/config.yaml
+    --config multirm/config.exampleyaml
 
 # 6. RewardBench 评估
 echo "[INFO] Running RewardBench evaluation..."
@@ -34,4 +34,3 @@ python -m multirm.eval_rewardbench \
     --split train
 
 echo "[DONE] All steps finished."
-
