@@ -48,6 +48,7 @@ class MultiTypeRewardModel(nn.Module):
             m = int(type_specs[k]["m"])
             self.heads[k] = nn.Linear(hidden_size, m, bias=True)
             self.reward_proj[k] = nn.Linear(hidden_size, 1, bias=True)
+        
 
         # 3) 简单池化（默认最后一个非 PAD token）
         self.pooling = "last_token"
