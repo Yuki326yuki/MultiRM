@@ -1,8 +1,9 @@
-# train/multirm/eval_rewardbench.py
 # -*- coding: utf-8 -*-
 import argparse
 import json
+import os
 from pathlib import Path
+from datetime import datetime
 
 import torch
 import yaml
@@ -14,6 +15,7 @@ from openrlhf.models.multitype_rm import MultiTypeRewardModel
 
 @torch.inference_mode()
 def score_one(model, tokenizer, prompt, resp, type_name, max_len, device):
+    """对单个 (prompt, response) 计算 reward 标量"""
     text = (prompt or "") + "\n\nAssistant: " + (resp or "")
     enc = tokenizer(
         text,
@@ -27,14 +29,33 @@ def score_one(model, tokenizer, prompt, resp, type_name, max_len, device):
     return float(r.item())
 
 
-def eval_rewardbench(model, tokenizer, type_name, split="train", subset=None, max_len=2048, device="cuda"):
-    ds = load_dataset("allenai/reward-bench", split=split)
+def eval_rewardbench(
+    model,
+    tokenizer,
+    type_name,
+    split="filtered",
+    subset=None,
+    max_len=2048,
+    device="cuda",
+    local_path=None,
+):
+    """
+    如果 local_path 不为 None，则从本地 JSONL 加载 RewardBench
+    否则从 HuggingFace 在线加载
+    """
+    if local_path is not None:
+        print(f"[RewardBench] Offline mode: loading from {local_path}")
+        ds = load_dataset("json", data_files={"data": local_path})["data"]
+    else:
+        print(f"[RewardBench] Online mode: loading allenai/reward-bench split={split}")
+        ds = load_dataset("allenai/reward-bench", split=split)
+
     total = 0
     correct = 0
     by_subset = {}
 
-    for row in ds:
-        s = row["subset"]
+    for idx, row in enumerate(ds):
+        s = row.get("subset", "unknown")
         if subset is not None and s != subset:
             continue
 
@@ -49,17 +70,39 @@ def eval_rewardbench(model, tokenizer, type_name, split="train", subset=None, ma
         total += 1
         correct += int(win)
 
-        stat = by_subset.setdefault(s, {"total": 0, "correct": 0})
-        stat["total"] += 1
-        stat["correct"] += int(win)
+        st = by_subset.setdefault(s, {"total": 0, "correct": 0})
+        st["total"] += 1
+        st["correct"] += int(win)
 
-    acc = correct / total if total > 0 else 0.0
-    print(f"[RewardBench] overall acc (type={type_name}, split={split}): {acc:.4f} ({correct}/{total})")
-    for s, stat in sorted(by_subset.items(), key=lambda kv: kv[0]):
-        if stat["total"] == 0:
+        # 每 200 条打印一次进度
+        if (idx + 1) % 200 == 0:
+            print(f"Processed {idx + 1}/{len(ds)} examples...")
+
+    # 没有评估样本（子集为空时可能出现）
+    if total == 0:
+        print("[RewardBench] No samples evaluated.")
+        return None
+
+    # 汇总结果
+    result = {
+        "type_name": type_name,
+        "total": total,
+        "correct": correct,
+        "overall_acc": correct / total,
+        "subset_acc": {},
+    }
+
+    for s, st in by_subset.items():
+        if st["total"] == 0:
             continue
-        a = stat["correct"] / stat["total"]
-        print(f"  subset={s:<20} acc={a:.4f} ({stat['correct']}/{stat['total']})")
+        result["subset_acc"][s] = st["correct"] / st["total"]
+
+    # 打印结果
+    print(f"[RewardBench] overall acc (type={type_name}): {result['overall_acc']:.4f} ({correct}/{total})")
+    for s, acc in result["subset_acc"].items():
+        print(f"  subset={s:<20} acc={acc:.4f}")
+
+    return result
 
 
 def load_cfg(path: str):
@@ -71,16 +114,19 @@ def load_cfg(path: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", type=str, required=True, help="checkpoint path (final.pt)")
-    ap.add_argument("--config", type=str, required=True, help="same config yaml/json used for training")
-    ap.add_argument("--type-name", type=str, default="overall", help="reward type to use")
-    ap.add_argument("--split", type=str, default="train")
+    ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument("--config", type=str, required=True)
+    ap.add_argument("--type-name", type=str, default="overall")
+    ap.add_argument("--split", type=str, default="filtered")
     ap.add_argument("--subset", type=str, default=None)
     ap.add_argument("--max-len", type=int, default=2048)
     ap.add_argument("--device", type=str, default="cuda")
+    ap.add_argument("--local-data", type=str, default=None,
+                    help="local RewardBench json/jsonl for offline evaluate")
     args = ap.parse_args()
 
     cfg = load_cfg(args.config)
+
     model_name = cfg["model"]["pretrain"]
     tok_name = cfg["model"].get("tokenizer_name_or_path") or model_name
 
@@ -92,16 +138,16 @@ def main():
         model_name_or_path=model_name,
         type_specs=cfg["types"],
         use_flash_attn_2=cfg["model"].get("flash_attn2", True),
-        lora=cfg["model"].get("lora", False),
-        lora_r=cfg["model"].get("lora_r", 8),
-        lora_alpha=cfg["model"].get("lora_alpha", 16),
-        lora_dropout=cfg["model"].get("lora_dropout", 0.05),
     ).to(args.device)
+
+    # 加载 checkpoint
     state = torch.load(args.ckpt, map_location=args.device)
-    model.load_state_dict(state["model"], strict=False)
+    if "model" in state:
+        state = state["model"]
+    model.load_state_dict(state, strict=False)
     model.eval()
 
-    eval_rewardbench(
+    result = eval_rewardbench(
         model,
         tokenizer,
         type_name=args.type_name,
@@ -109,7 +155,23 @@ def main():
         subset=args.subset,
         max_len=args.max_len,
         device=args.device,
+        local_path=args.local_data,
     )
+
+    if result is None:
+        return
+
+    # 保存 json 到 eval 目录
+    save_dir = Path("eval")
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = save_dir / f"result_{args.type_name}_{timestamp}.json"
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, ensure_ascii=False)
+
+    print(f"\n[Saved] results saved to: {out_path}\n")
 
 
 if __name__ == "__main__":
