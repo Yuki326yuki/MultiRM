@@ -23,14 +23,28 @@ echo "[INFO] PYTHONPATH = $PYTHONPATH"
 # 5. 训练多类型 Reward Model
 echo "[INFO] Training MultiType Reward Model..."
 python -m openrlhf.cli.train_multirm \
-    --config multirm/config.exampleyaml
+    --config multirm/config.example.yaml
 
 # 6. RewardBench 评估
 echo "[INFO] Running RewardBench evaluation..."
 python -m multirm.eval_rewardbench \
-    --ckpt outputs/multirm-8b/final.pt \
-    --config multirm/config.yaml \
+    --ckpt outputs/multirm-Skywork-Reward-V2-Llama-3.2-1B/final.pt \
+    --config multirm/config.example.yaml \
     --type-name overall \
+    --local-data data/reward_bench_filtered.jsonl\
     --split train
 
 echo "[DONE] All steps finished."
+
+#打分baseline
+CUDA_VISIBLE_DEVICES=7 python -m multirm.eval_rewardbench_basemodel \
+  --model /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct \
+  --local-data data/reward_bench_filtered.jsonl
+
+
+#生成baseline
+CUDA_VISIBLE_DEVICES=7 python -m multirm.eval_rewardbench_generative \
+  --model /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct  \
+  --local-data data/reward_bench_filtered.jsonl \
+  --max-new-tokens 16 \
+  --temperature 0.0
