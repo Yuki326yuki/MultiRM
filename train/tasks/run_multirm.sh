@@ -27,7 +27,7 @@ python -m openrlhf.cli.train_multirm \
 
 # 6. RewardBench 评估
 echo "[INFO] Running RewardBench evaluation..."
-python -m multirm.eval_rewardbench \
+CUDA_VISIBLE_DEVICES=7 python -m multirm.eval_rewardbench \
     --ckpt outputs/multirm-Skywork-Reward-V2-Llama-3.2-1B/final.pt \
     --config multirm/config.example.yaml \
     --type-name overall \
@@ -36,13 +36,13 @@ python -m multirm.eval_rewardbench \
 
 echo "[DONE] All steps finished."
 
-#打分baseline
+#打分形态baseline
 CUDA_VISIBLE_DEVICES=7 python -m multirm.eval_rewardbench_basemodel \
   --model /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct \
   --local-data data/reward_bench_filtered.jsonl
 
 
-#生成baseline
+#生成形态baseline
 CUDA_VISIBLE_DEVICES=7 python -m multirm.eval_rewardbench_generative \
   --model /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct  \
   --local-data data/reward_bench_filtered.jsonl \
