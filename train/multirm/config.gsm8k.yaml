@@ -1,0 +1,33 @@
+# ================= MultiRM GSM8K Training Config ================= #
+seed: 42
+
+model:
+    pretrain: /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct
+    tokenizer_name_or_path: /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct
+
+data:
+  train_path: data/gsm8k_train_multirm_llm.jsonl
+
+types:
+   math_final_answer: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
+   math_reasoning_validity: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
+   step_correctness: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
+   reasoning_complexity: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
+   format_adherence: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
+   
+
+train:
+  batch_size: 4          # A800 80G + bf16，8B 模型可尝试 4
+  max_len: 2048
+  steps: 20000
+  lr: 3.0e-4
+  weight_decay: 0.01
+  grad_clip: 1.0
+  log_every: 20
+  save_every: 1000
+  out_dir: outputs/gsm8k-multirm-0.5b_llm
+  beta_kl: 0.0          # 目前没有 ref_prob，先关掉；以后接参考模型再开
+  l2_lambda: 0.0        # 如需显式 L2 正则，这里设 >0
+
+# ✅ optional —如果你的 example.yaml 有，就保留，否则可删
+# deepspeed: configs/ds_config_zero2.json
