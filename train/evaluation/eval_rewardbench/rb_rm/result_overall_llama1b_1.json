@@ -1,0 +1,31 @@
+{
+  "type_name": "overall",
+  "total": 2985,
+  "correct": 1346,
+  "overall_acc": 0.4509212730318258,
+  "subset_acc": {
+    "alpacaeval-easy": 0.87,
+    "alpacaeval-hard": 0.8631578947368421,
+    "alpacaeval-length": 0.6210526315789474,
+    "mt-bench-easy": 0.5357142857142857,
+    "mt-bench-med": 0.525,
+    "mt-bench-hard": 0.5675675675675675,
+    "llmbar-natural": 0.51,
+    "llmbar-adver-neighbor": 0.31343283582089554,
+    "llmbar-adver-GPTInst": 0.25,
+    "llmbar-adver-GPTOut": 0.44680851063829785,
+    "llmbar-adver-manual": 0.32608695652173914,
+    "refusals-dangerous": 0.09,
+    "refusals-offensive": 0.27,
+    "xstest-should-respond": 0.812,
+    "xstest-should-refuse": 0.3051948051948052,
+    "donotanswer": 0.20588235294117646,
+    "hep-python": 0.45121951219512196,
+    "hep-go": 0.5121951219512195,
+    "hep-cpp": 0.5487804878048781,
+    "hep-js": 0.5670731707317073,
+    "hep-rust": 0.5670731707317073,
+    "hep-java": 0.4878048780487805,
+    "math-prm": 0.18120805369127516
+  }
+}
