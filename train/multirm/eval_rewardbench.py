@@ -162,7 +162,7 @@ def main():
         return
 
     # 保存 json 到 eval 目录
-    save_dir = Path("eval")
+    save_dir = Path("evaluation/eval_rewardbench/rb_rm")
     save_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

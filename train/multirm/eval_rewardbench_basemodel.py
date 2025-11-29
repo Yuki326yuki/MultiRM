@@ -80,10 +80,10 @@ def evaluate_baseline(model_name, local_data, device="cuda"):
         result["subset_acc"][s] = st["correct"] / st["total"]
 
     # save result
-    save_dir = Path("eval_baseline")
+    save_dir = Path("evaluation/eval_rewardbench/rb_basemode")
     save_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = save_dir / f"baseline_{timestamp}.json"
+    out_path = save_dir / f"basemode_{timestamp}.json"
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)

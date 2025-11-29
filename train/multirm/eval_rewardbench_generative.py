@@ -176,7 +176,7 @@ def evaluate_generative(
         print(f"  subset={s:<20} acc={acc_s:.4f} ({st['correct']}/{st['total']})")
 
     # 保存结果
-    save_dir = Path("eval_generative")
+    save_dir = Path("evaluation/eval_rewardbench/rb_generative")
     save_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = save_dir / f"generative_{ts}.json"
