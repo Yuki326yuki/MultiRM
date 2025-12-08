@@ -8,7 +8,7 @@ import random
 import torch
 import yaml
 
-from openrlhf.trainer.multirm_trainer import MultiTypeRMTrainer
+from openrlhf.trainer.multirmt_trainer import MultiTypeRMTrainer
 
 
 def load_config(path: str):
