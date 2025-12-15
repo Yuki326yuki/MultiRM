@@ -32,9 +32,8 @@ class MultiTypeRewardModel(nn.Module):
         self.type_specs = type_specs
         self.types = sorted(type_specs.keys())
 
-        # 1) Causal LM 主干 (policy / ORM / implicit PRM 同体)
+        # 1) 主模型 lm，用于生成和打分
         cfg = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-        # 为了能拿到 hidden_states 来做 encode
         cfg.output_hidden_states = True
         if use_flash_attn_2:
             cfg.attn_implementation = "flash_attention_2"
@@ -62,7 +61,9 @@ class MultiTypeRewardModel(nn.Module):
         if freeze_ref:
             for p in self.ref_lm.parameters():
                 p.requires_grad = False
+            self.ref_lm.eval()
 
+        # 3) 每类型独立 softmax 头 + （可选）标量投影
         hidden_size = getattr(self.lm.config, "hidden_size", None)
         if hidden_size is None and hasattr(self.lm.config, "hidden_sizes"):
             hidden_size = self.lm.config.hidden_sizes[-1]
@@ -71,11 +72,17 @@ class MultiTypeRewardModel(nn.Module):
         # 3) 每类型独立 softmax 头 + （可选）标量投影
         self.heads = nn.ModuleDict()
         self.reward_proj = nn.ModuleDict()
+        # 基于序列隐式奖励 r_seq 的多类分类 head
+        self.cls_heads_from_reward = nn.ModuleDict()
+
         for k in self.types:
             m = int(type_specs[k]["m"])
+            # 句向量上的多类 softmax（如需直接用 emb 分类）
             self.heads[k] = nn.Linear(hidden_size, m, bias=True)
+            # 句向量上的标量回归（可选）
             self.reward_proj[k] = nn.Linear(hidden_size, 1, bias=True)
-
+            # 序列隐式奖励 r_seq: [B] → [B, m_k] 的多类分类头
+            self.cls_heads_from_reward[k] = nn.Linear(1, m, bias=True)
         # 4) 句向量池化策略
         self.pooling = "last_token"
 
@@ -83,19 +90,21 @@ class MultiTypeRewardModel(nn.Module):
 
     def encode(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         """
-        输入 (prompt+response) token 序列，输出 [B, D] 表征 h(x,y)
-        使用 lm 的 hidden_states[-1]，不影响 logits 用途。
+        返回句向量 h(x,y)，目前采用 last_token pooling。
         """
         out = self.lm(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
         )
         last_hidden = out.hidden_states[-1]  # [B, T, D]
 
         if self.pooling == "last_token":
-            idx = attention_mask.long().sum(dim=1) - 1
-            idx = torch.clamp(idx, min=0)
-            emb = last_hidden[torch.arange(last_hidden.size(0), device=last_hidden.device), idx]
+            # 取每行最后一个非 padding token 的 hidden state
+            lengths = attention_mask.sum(dim=-1)  # [B]
+            idx = (lengths - 1).clamp(min=0).view(-1, 1, 1).expand(-1, 1, last_hidden.size(-1))  # [B,1,D]
+            emb = last_hidden.gather(dim=1, index=idx).squeeze(1)  # [B, D]
         else:
             emb = (last_hidden * attention_mask.unsqueeze(-1)).sum(dim=1) / attention_mask.sum(
                 dim=1, keepdim=True
@@ -119,62 +128,86 @@ class MultiTypeRewardModel(nn.Module):
         """
         return self.reward_proj[k](emb).squeeze(-1)
 
+    def cls_logits_from_reward(self, r_seq: torch.Tensor, k: str) -> torch.Tensor:
+        """基于序列隐式奖励 r_seq 的多类分类 head:
+        r_seq: [B] → logits: [B, m_k]
+        """
+        tau = float(self.type_specs[k].get("tau", 1.0))
+        # 先扩展到 [B, 1] 再线性映射到 [B, m_k]
+        return self.cls_heads_from_reward[k](r_seq.unsqueeze(-1)) / tau
+
     # ========== token-level implicit reward ==========
 
     @torch.no_grad()
     def _ref_logprobs(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         """
-        计算参考模型在真实 token 上的 log p_ref(y_t | x, y_<t)，shape: [B, T]
-        （no grad）
+        计算参考模型 ref_lm 的 token-level log P_ref(y_t | x, y_{<t})
+        返回形状为 [B, T] 的 logprobs（只保留对应 input_ids 的位置）。
         """
         out = self.ref_lm(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            use_cache=False,
+            output_hidden_states=False,
+            return_dict=True,
         )
         logits = out.logits  # [B, T, V]
-        logp = logits.log_softmax(dim=-1)  # [B, T, V]
-        # gather 到真实 token 上
-        token_logp_ref = logp.gather(-1, input_ids.unsqueeze(-1)).squeeze(-1)  # [B, T]
-        return token_logp_ref
+        log_probs = torch.log_softmax(logits, dim=-1)
+        # 取对应 token 的 logprob
+        token_logp = torch.gather(log_probs, dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)  # [B, T]
+        # padding 位置置 0
+        token_logp = token_logp * attention_mask
+        return token_logp
 
     def _lm_logprobs(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         """
-        当前模型在真实 token 上的 log p(y_t | x, y_<t)，shape: [B, T]
+        计算当前 lm 的 token-level log P_lm(y_t | x, y_{<t})
+        返回形状为 [B, T] 的 logprobs。
         """
         out = self.lm(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            use_cache=False,
+            output_hidden_states=False,
+            return_dict=True,
         )
         logits = out.logits  # [B, T, V]
-        logp = logits.log_softmax(dim=-1)
-        token_logp = logp.gather(-1, input_ids.unsqueeze(-1)).squeeze(-1)  # [B, T]
+        log_probs = torch.log_softmax(logits, dim=-1)
+        token_logp = torch.gather(log_probs, dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)  # [B, T]
+        token_logp = token_logp * attention_mask
         return token_logp
 
     def token_implicit_reward(
         self,
-        input_ids: torch.Tensor,       # [B, T]
-        attention_mask: torch.Tensor,  # [B, T]
-        response_mask: torch.Tensor,   # [B, T], 1=属于 response
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        response_mask: torch.Tensor,
         beta: float = 1.0,
     ):
         """
-        根据 PRIME / Implicit PRM:
-          r_φ(y_t) = β ( log π_φ(y_t | y_<t) - log π_ref(y_t | y_<t) )
+        计算 token-level 隐式奖励 r_t 以及序列级奖励 r_seq。
 
-        返回:
-          - r_tokens: [B, T]，仅在 response_mask==1 且非 pad 上非零
-          - r_seq:    [B]，对 response 区间聚合后的标量 reward
+        输入:
+          - input_ids:    [B, T]
+          - attention_mask: [B, T]
+          - response_mask:  [B, T]  (prompt 之后到最后 token 为 1，其他为 0)
+
+        输出:
+          - r_tokens: [B, T]，在 response 位置为非零，其余为 0
+          - r_seq:    [B]，为 response 区间 r_t 的平均（或和 / 归一化）
         """
-        # 当前模型 logp
-        token_logp = self._lm_logprobs(input_ids, attention_mask)      # [B, T]
-        # 参考模型 logp（无梯度）
-        token_logp_ref = self._ref_logprobs(input_ids, attention_mask) # [B, T]
+        # 1) lm & ref_lm 的 token-level logprobs
+        with torch.no_grad():
+            logp_ref = self._ref_logprobs(input_ids, attention_mask)  # [B, T]
 
-        # implicit token-level reward
-        r_tokens = beta * (token_logp - token_logp_ref)  # [B, T]
+        logp_lm = self._lm_logprobs(input_ids, attention_mask)  # [B, T]
 
-        # 只在 response 区间聚合
-        mask = (attention_mask * response_mask).float()  # [B, T]
+        # 2) log-ratio 作为原始隐式 reward signal
+        #    r_t = (log p_lm - log p_ref) * response_mask
+        r_tokens = (logp_lm - logp_ref) * response_mask  # [B, T]
+
+        # 3) 归一化 / 平均为序列级奖励
+        mask = (response_mask > 0).float()
         r_tokens = r_tokens * mask
 
         lengths = mask.sum(dim=-1).clamp(min=1.0)        # 防止除 0
