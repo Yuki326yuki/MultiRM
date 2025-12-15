@@ -2,32 +2,37 @@
 seed: 42
 
 model:
-    pretrain: /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct
-    tokenizer_name_or_path: /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct
+  pretrain: /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct
+  tokenizer_name_or_path: /hpc2hdd/home/jianmu/home/models/Qwen2.5-0.5B-Instruct
 
 data:
   train_path: data/gsm8k_train_multirm_llm.jsonl
 
 types:
-   math_final_answer: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
-   math_reasoning_validity: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
-   step_correctness: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
-   reasoning_complexity: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
-   format_adherence: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25 }
-   
+  math_final_answer:       { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25, beta: 0.05 }
+  math_reasoning_validity: { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25, beta: 0.05 }
+  step_correctness:        { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25, beta: 0.05 }
+  reasoning_complexity:    { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25, beta: 0.05 }
+  format_adherence:        { m: 3, tau: 1.0, alpha: 0.7, mu: 0.25, beta: 0.05 }
 
 train:
-  batch_size: 4          # A800 80G + bf16，8B 模型可尝试 4
+  batch_size: 4
   max_len: 2048
-  steps: 20000
-  lr: 3.0e-4
+  steps: 20000          # 建议先减半，观察一下 LM 是否稳定，再决定要不要拉到 2w
+  # ------- 学习率相关 -------
+  lr: 1.0e-4            # 多类型 head / reward 部分的 lr（原来是 3e-4，稍微保守一点）
+  lr_lm: 5.0e-6         # ★ 新增：LM 主干的 lr，用于 multirmt_trainer 里的 lm param group
   weight_decay: 0.01
   grad_clip: 1.0
-  log_every: 20
-  save_every: 1000
-  out_dir: outputs/gsm8k-multirm-0.5b_llm
-  beta_kl: 0.0          # 目前没有 ref_prob，先关掉；以后接参考模型再开
+
+  # ------- Loss 权重 -------
+  lambda_lm: 1.0        # ★ 新增：LM loss 的权重，loss_total = loss_rm + lambda_lm * loss_lm
+  beta_kl: 0.0          # 目前没有 ref_prob_* 信号，就先关掉 KL（之后如果加其他参考分布再开）
   l2_lambda: 0.0        # 如需显式 L2 正则，这里设 >0
 
-# ✅ optional —如果你的 example.yaml 有，就保留，否则可删
-# deepspeed: configs/ds_config_zero2.json
+  log_every: 20
+  save_every: 1000
+  out_dir: outputs/gsm8k-multirmt-0.5b_llm_2
+
+# deepspeed: configs/ds_config_zero2.json   # 如果以后要上 DS 再开
+
